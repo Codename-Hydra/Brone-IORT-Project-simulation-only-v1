@@ -2,7 +2,7 @@
 
 ![ROS 2 Jazzy](https://img.shields.io/badge/ROS_2-Jazzy-22314E?logo=ros) ![Webots](https://img.shields.io/badge/Webots-R2025a-red?logo=geometry-networks) ![Python 3](https://img.shields.io/badge/Python-3.12-blue?logo=python)
 
-Repositori ini adalah meta-package untuk **BRone System** (Internet of Robotic Things), sebuah ekosistem *Digital Twin* berbasis ROS 2 yang mengintegrasikan Brone Humanoid (OP3) dan platform Omnidirectional 4-roda (BRone Roda), serta memvisualisasikan seluruh telemetri ke dalam Web Dashboard interaktif.
+Repositori ini adalah meta-package untuk **Brone System** (Internet of Robotic Things), sebuah ekosistem *Digital Twin* berbasis ROS 2 yang mengintegrasikan Brone Humanoid (OP3) dan platform Omnidirectional 4-roda (BRone Roda), serta memvisualisasikan seluruh telemetri ke dalam Web Dashboard interaktif.
 
 ## 🗂️ Struktur Repositori
 
