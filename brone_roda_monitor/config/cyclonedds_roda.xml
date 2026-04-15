@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+  CycloneDDS config for BRone Roda ↔ Orange Pi communication
+  Uses peer-to-peer discovery (no multicast needed).
+
+  Orange Pi IP : 10.42.0.247
+  Laptop       : auto-detected
+
+  Usage:
+    export CYCLONEDDS_URI=file:///path/to/cyclonedds_roda.xml
+    export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+-->
+<CycloneDDS xmlns="https://cdds.io/config" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="https://cdds.io/config https://raw.githubusercontent.com/eclipse-cyclonedds/cyclonedds/master/etc/cyclonedds.xsd">
+  <Domain>
+    <General>
+      <Interfaces>
+        <NetworkInterface autodetermine="true" />
+      </Interfaces>
+      <AllowMulticast>false</AllowMulticast>
+    </General>
+    <Discovery>
+      <ParticipantIndex>auto</ParticipantIndex>
+      <Peers>
+        <Peer address="10.42.0.247" />
+        <Peer address="localhost" />
+      </Peers>
+      <MaxAutoParticipantIndex>120</MaxAutoParticipantIndex>
+    </Discovery>
+  </Domain>
+</CycloneDDS>

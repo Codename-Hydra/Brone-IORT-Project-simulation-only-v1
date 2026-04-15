@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="id">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BRone Roda — Power Monitor Dashboard</title>
+    <meta name="description" content="Real-time power telemetry dashboard for BRone omnidirectional wheel robot">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="roda_style.css">
+</head>
+
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-left">
+            <span class="header-icon">🛞</span>
+            <div>
+                <h1 class="header-title">BRONE RODA MONITOR</h1>
+                <span class="header-subtitle">Omnidirectional Robot — Real-Time Power Telemetry · <a href="/" style="color:#58a6ff;text-decoration:none">← Kembali ke Menu</a></span>
+            </div>
+        </div>
+        <div class="header-right">
+            <div class="status-badge" id="ws-status">
+                <span class="status-dot disconnected"></span>
+                <span class="status-text">Disconnected</span>
+            </div>
+            <div class="status-badge" id="ping-status">
+                <span class="status-dot disconnected"></span>
+                <span class="status-text">Ping: --</span>
+            </div>
+            <div class="status-badge" id="uptime-badge">
+                <span class="uptime-text">00:00:00</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="dashboard">
+        <!-- Left Column: Battery + Motion -->
+        <div class="left-column">
+            <!-- Battery Gauge -->
+            <div class="panel battery-panel" id="battery-panel">
+                <h2 class="panel-title">Battery 6S LiPo</h2>
+                <div class="battery-gauge-container">
+                    <canvas id="battery-gauge" width="260" height="260"></canvas>
+                    <div class="battery-value">
+                        <span class="battery-voltage" id="battery-voltage">--</span>
+                        <span class="battery-unit">V</span>
+                    </div>
+                    <div class="battery-status" id="battery-status">UNKNOWN</div>
+                </div>
+                <div class="battery-info-row">
+                    <div class="info-cell">
+                        <span class="info-label">SOC</span>
+                        <span class="info-value" id="battery-soc">--%</span>
+                    </div>
+                    <div class="info-cell">
+                        <span class="info-label">Cell</span>
+                        <span class="info-value" id="cell-voltage">-- V</span>
+                    </div>
+                    <div class="info-cell">
+                        <span class="info-label">Runtime</span>
+                        <span class="info-value" id="runtime">-- h</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Motion Vector -->
+            <div class="panel motion-panel">
+                <h2 class="panel-title">Motion Vector</h2>
+                <canvas id="motion-canvas" width="240" height="240"></canvas>
+                <div class="motion-values">
+                    <div class="motion-val">
+                        <span class="mv-label">Vx</span>
+                        <span class="mv-num" id="motion-vx">0.000</span>
+                    </div>
+                    <div class="motion-val">
+                        <span class="mv-label">Vy</span>
+                        <span class="mv-num" id="motion-vy">0.000</span>
+                    </div>
+                    <div class="motion-val">
+                        <span class="mv-label">rad/s</span>
+                        <span class="mv-num" id="motion-omega">0.000</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column: Chart + Wheels + Summary -->
+        <section class="right-column">
+            <!-- Power Chart -->
+            <div class="panel chart-panel">
+                <h2 class="panel-title">Power History</h2>
+                <div class="chart-container">
+                    <canvas id="power-chart"></canvas>
+                </div>
+            </div>
+
+            <!-- Wheel Status Grid -->
+            <div class="panel wheel-panel">
+                <h2 class="panel-title">Wheel Status — 4× Mecanum</h2>
+                <div class="wheel-grid">
+                    <div class="wheel-card" id="wheel-FL">
+                        <div class="wc-header">FL</div>
+                        <div class="wc-row"><span class="wc-label">Torque</span><span class="wc-val" data-field="torque">-- N·m</span></div>
+                        <div class="wc-row"><span class="wc-label">RPM</span><span class="wc-val" data-field="rpm">--</span></div>
+                        <div class="wc-row"><span class="wc-label">Current</span><span class="wc-val" data-field="current">-- A</span></div>
+                        <div class="wc-row"><span class="wc-label">Power</span><span class="wc-val" data-field="power">-- W</span></div>
+                    </div>
+                    <div class="wheel-card" id="wheel-FR">
+                        <div class="wc-header">FR</div>
+                        <div class="wc-row"><span class="wc-label">Torque</span><span class="wc-val" data-field="torque">-- N·m</span></div>
+                        <div class="wc-row"><span class="wc-label">RPM</span><span class="wc-val" data-field="rpm">--</span></div>
+                        <div class="wc-row"><span class="wc-label">Current</span><span class="wc-val" data-field="current">-- A</span></div>
+                        <div class="wc-row"><span class="wc-label">Power</span><span class="wc-val" data-field="power">-- W</span></div>
+                    </div>
+                    <div class="wheel-card" id="wheel-RL">
+                        <div class="wc-header">RL</div>
+                        <div class="wc-row"><span class="wc-label">Torque</span><span class="wc-val" data-field="torque">-- N·m</span></div>
+                        <div class="wc-row"><span class="wc-label">RPM</span><span class="wc-val" data-field="rpm">--</span></div>
+                        <div class="wc-row"><span class="wc-label">Current</span><span class="wc-val" data-field="current">-- A</span></div>
+                        <div class="wc-row"><span class="wc-label">Power</span><span class="wc-val" data-field="power">-- W</span></div>
+                    </div>
+                    <div class="wheel-card" id="wheel-RR">
+                        <div class="wc-header">RR</div>
+                        <div class="wc-row"><span class="wc-label">Torque</span><span class="wc-val" data-field="torque">-- N·m</span></div>
+                        <div class="wc-row"><span class="wc-label">RPM</span><span class="wc-val" data-field="rpm">--</span></div>
+                        <div class="wc-row"><span class="wc-label">Current</span><span class="wc-val" data-field="current">-- A</span></div>
+                        <div class="wc-row"><span class="wc-label">Power</span><span class="wc-val" data-field="power">-- W</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Summary Cards -->
+            <div class="summary-row" id="summary-row">
+                <div class="panel summary-card">
+                    <span class="card-label">Total Power</span>
+                    <span class="card-value" id="total-power">--</span>
+                    <span class="card-unit">W</span>
+                </div>
+                <div class="panel summary-card">
+                    <span class="card-label">Total Current</span>
+                    <span class="card-value" id="total-current">--</span>
+                    <span class="card-unit">A</span>
+                </div>
+                <div class="panel summary-card">
+                    <span class="card-label">Avg RPM</span>
+                    <span class="card-value" id="avg-rpm">--</span>
+                    <span class="card-unit"></span>
+                </div>
+                <div class="panel summary-card">
+                    <span class="card-label">Battery SOC</span>
+                    <span class="card-value" id="soc-card">--</span>
+                    <span class="card-unit">%</span>
+                </div>
+            </div>
+
+            <!-- Conclusion Panel -->
+            <div class="panel conclusion-panel" id="conclusion-panel">
+                <div class="conclusion-icon" id="conclusion-icon">🛞</div>
+                <div class="conclusion-body">
+                    <div class="conclusion-title" id="conclusion-title">Menunggu Data...</div>
+                    <div class="conclusion-text" id="conclusion-text">
+                        Dashboard terhubung. Menunggu data dari <strong>roda_telemetry_node</strong>.
+                    </div>
+                    <div class="conclusion-timestamp" id="conclusion-ts"></div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Footer Branding -->
+    <footer class="footer">
+        <div class="footer-brand">
+            <img src="logo_ub.png" alt="Universitas Brawijaya" class="footer-logo" id="logo-ub">
+            <span class="footer-item brand-ub">Universitas Brawijaya</span>
+        </div>
+        <span class="footer-separator">|</span>
+        <div class="footer-brand">
+            <img src="logo_globalizing.png" alt="Globalizing UB" class="footer-logo" id="logo-global">
+            <span class="footer-item brand-global">Globalizing UB</span>
+        </div>
+        <span class="footer-separator">|</span>
+        <div class="footer-brand">
+            <img src="logo_brone.png" alt="BRONE" class="footer-logo" id="logo-brone">
+            <span class="footer-item brand-brone">BRONE</span>
+        </div>
+    </footer>
+
+    <script src="roda_app.js?v=2"></script>
+</body>
+
+</html>

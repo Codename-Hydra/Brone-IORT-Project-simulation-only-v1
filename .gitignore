@@ -1,0 +1,73 @@
+# =========================================================
+# BRone IORT Project - Robotics & ROS 2 .gitignore
+# =========================================================
+
+# ROS 2 & Colcon build artifacts (if accidentally built here)
+build/
+install/
+log/
+*.log
+*.log.*
+
+# Python caches and compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.eggs/
+
+# C++ build artifacts
+*.o
+*.obj
+*.so
+*.dylib
+*.a
+*.lib
+*.dll
+CMakeCache.txt
+CMakeFiles/
+Makefile
+cmake_install.cmake
+compile_commands.json
+
+# Webots Simulation files
+*.wbt.bak
+*.wbproj
+*.wbproj.bak
+controllers/*/*.exe
+controllers/*/*.class
+controllers/*/*.o
+controllers/*/*.obj
+controllers/*/*.pdb
+controllers/*/*.pyc
+
+# IDEs and Editors
+.vscode/
+.idea/
+*.swp
+*~
+*.swo
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Credentials & environment configurations
+.env
+.env.local
+*.pem
+*.key
+secret.json
+credentials.yaml
+
+# Hardware specific test files
+testing_logs/
+sandbox/

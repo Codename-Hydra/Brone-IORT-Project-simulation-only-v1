@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="id">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BRONE Monitor — Pilih Mode Dashboard</title>
+    <meta name="description" content="BRONE Power Monitor — choose between OP3 Body or Roda dashboard">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-panel: #1c2333;
+            --border: #30363d;
+            --text: #e6edf3;
+            --text-sec: #b1bac4;
+            --text-muted: #768390;
+            --accent-blue: #58a6ff;
+            --accent-green: #00ff88;
+            --accent-purple: #bc8cff;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', -apple-system, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        /* Animated background */
+        body::before {
+            content: '';
+            position: fixed;
+            top: -50%; left: -50%;
+            width: 200%; height: 200%;
+            background:
+                radial-gradient(ellipse at 20% 50%, rgba(88, 166, 255, 0.06) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 50%, rgba(188, 140, 255, 0.06) 0%, transparent 50%),
+                radial-gradient(ellipse at 50% 80%, rgba(0, 255, 136, 0.04) 0%, transparent 50%);
+            animation: bgShift 15s ease-in-out infinite;
+            z-index: -1;
+        }
+
+        @keyframes bgShift {
+            0%, 100% { transform: translate(0, 0) rotate(0deg); }
+            33% { transform: translate(-2%, 1%) rotate(1deg); }
+            66% { transform: translate(2%, -1%) rotate(-1deg); }
+        }
+
+        /* Header */
+        .selector-header {
+            text-align: center;
+            margin-bottom: 48px;
+        }
+
+        .selector-header h1 {
+            font-size: 2.6rem;
+            font-weight: 800;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+
+        .selector-header h1 span {
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple), var(--accent-green));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .selector-header p {
+            color: var(--text-sec);
+            font-size: 1.1rem;
+        }
+
+        /* Cards Grid */
+        .card-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 32px;
+            max-width: 860px;
+            width: 100%;
+            padding: 0 24px;
+        }
+
+        .mode-card {
+            position: relative;
+            background: var(--bg-panel);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 36px 32px;
+            text-decoration: none;
+            color: var(--text);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            transition: transform 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+            overflow: hidden;
+            cursor: pointer;
+        }
+
+        .mode-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 3px;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .mode-card:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 24px 60px -12px rgba(0, 0, 0, 0.5);
+        }
+
+        .mode-card:hover::before { opacity: 1; }
+
+        .mode-card:active {
+            transform: translateY(-2px) scale(0.98);
+        }
+
+        /* OP3 Card */
+        .card-op3:hover { border-color: var(--accent-blue); }
+        .card-op3::before {
+            background: linear-gradient(90deg, transparent, var(--accent-blue), transparent);
+        }
+
+        /* Roda Card */
+        .card-roda:hover { border-color: var(--accent-purple); }
+        .card-roda::before {
+            background: linear-gradient(90deg, transparent, var(--accent-purple), transparent);
+        }
+
+        .card-icon {
+            font-size: 4.5rem;
+            margin-bottom: 18px;
+            filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.3));
+        }
+
+        .card-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .card-op3 .card-title { color: var(--accent-blue); }
+        .card-roda .card-title { color: var(--accent-purple); }
+
+        .card-desc {
+            font-size: 0.9rem;
+            color: var(--text-sec);
+            line-height: 1.6;
+            margin-bottom: 20px;
+        }
+
+        .card-specs {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            justify-content: center;
+        }
+
+        .spec-tag {
+            font-size: 0.72rem;
+            font-family: 'JetBrains Mono', monospace;
+            padding: 4px 10px;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            color: var(--text-muted);
+        }
+
+        .card-arrow {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-top: 18px;
+            padding: 8px 20px;
+            border-radius: 20px;
+            transition: all 0.3s ease;
+        }
+
+        .card-op3 .card-arrow {
+            color: var(--accent-blue);
+            background: rgba(88, 166, 255, 0.1);
+            border: 1px solid rgba(88, 166, 255, 0.2);
+        }
+
+        .card-op3:hover .card-arrow {
+            background: rgba(88, 166, 255, 0.2);
+        }
+
+        .card-roda .card-arrow {
+            color: var(--accent-purple);
+            background: rgba(188, 140, 255, 0.1);
+            border: 1px solid rgba(188, 140, 255, 0.2);
+        }
+
+        .card-roda:hover .card-arrow {
+            background: rgba(188, 140, 255, 0.2);
+        }
+
+        /* Footer */
+        .landing-footer {
+            position: fixed;
+            bottom: 0;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 20px;
+            padding: 14px 24px;
+            background: var(--bg-secondary);
+            border-top: 1px solid var(--border);
+        }
+
+        .footer-brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .footer-logo {
+            height: 32px;
+            width: auto;
+            object-fit: contain;
+            border-radius: 4px;
+        }
+
+        .footer-item {
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: var(--text-sec);
+        }
+
+        .footer-item.brand-ub { color: var(--accent-blue); }
+        .footer-item.brand-global { color: var(--accent-green); }
+        .footer-item.brand-brone { color: var(--accent-purple); font-weight: 700; }
+
+        .footer-separator {
+            color: var(--border);
+            font-size: 0.9rem;
+        }
+
+        /* Responsive */
+        @media (max-width: 700px) {
+            .card-grid { grid-template-columns: 1fr; gap: 20px; }
+            .selector-header h1 { font-size: 1.8rem; }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="selector-header">
+        <h1><span>BRONE POWER MONITOR</span></h1>
+        <p>Pilih dashboard untuk mulai monitoring robot</p>
+    </div>
+
+    <div class="card-grid">
+        <!-- OP3 Body Card -->
+        <a href="op3.html" class="mode-card card-op3" id="card-op3">
+            <div class="card-icon">🦿</div>
+            <div class="card-title">OP3 BODY</div>
+            <div class="card-desc">
+                Monitor 20 servo Dynamixel XM430-W350 pada robot humanoid bipedal ROBOTIS OP3.
+                Joint voltage, torque, current, dan power per-servo.
+            </div>
+            <div class="card-specs">
+                <span class="spec-tag">20 Joints</span>
+                <span class="spec-tag">XM430-W350</span>
+                <span class="spec-tag">3S LiPo</span>
+                <span class="spec-tag">Bipedal</span>
+            </div>
+            <div class="card-arrow">Buka Dashboard →</div>
+        </a>
+
+        <!-- BRone Roda Card -->
+        <a href="roda.html" class="mode-card card-roda" id="card-roda">
+            <div class="card-icon">🛞</div>
+            <div class="card-title">BRONE RODA</div>
+            <div class="card-desc">
+                Monitor 4 motor roda mecanum omnidirectional, battery 6S LiPo,
+                motion vector, RPM, torque, dan estimasi runtime.
+            </div>
+            <div class="card-specs">
+                <span class="spec-tag">4 Wheels</span>
+                <span class="spec-tag">Mecanum</span>
+                <span class="spec-tag">6S LiPo</span>
+                <span class="spec-tag">Omnidirectional</span>
+            </div>
+            <div class="card-arrow">Buka Dashboard →</div>
+        </a>
+    </div>
+
+    <!-- Footer -->
+    <footer class="landing-footer">
+        <div class="footer-brand">
+            <img src="logo_ub.png" alt="Universitas Brawijaya" class="footer-logo">
+            <span class="footer-item brand-ub">Universitas Brawijaya</span>
+        </div>
+        <span class="footer-separator">|</span>
+        <div class="footer-brand">
+            <img src="logo_globalizing.png" alt="Globalizing UB" class="footer-logo">
+            <span class="footer-item brand-global">Globalizing UB</span>
+        </div>
+        <span class="footer-separator">|</span>
+        <div class="footer-brand">
+            <img src="logo_brone.png" alt="BRONE" class="footer-logo">
+            <span class="footer-item brand-brone">BRONE</span>
+        </div>
+    </footer>
+</body>
+
+</html>

@@ -1,0 +1,44 @@
+#VRML_SIM R2025a utf8
+
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023b/projects/objects/backgrounds/protos/TexturedBackground.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023b/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023b/projects/objects/floors/protos/RectangleArena.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023b/projects/appearances/protos/BrushedAluminium.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023b/projects/samples/contests/robocup/protos/RobocupSoccerField.proto"
+EXTERNPROTO "../protos/RodaOmniBrone.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/balls/protos/FifaSoccerBall.proto"
+
+WorldInfo {
+  info [
+    "Thanks to Mehdi Ghanavati, Shahid Chamran University"
+  ]
+  title "Omni-wheels"
+  basicTimeStep 8
+}
+Viewpoint {
+  orientation -0.36194560156576516 0.42073625217839716 0.831851181167685 1.604267028059722
+  position -2.6067392325224796 -11.129245924836336 11.57570709110965
+  follow "solid"
+}
+TexturedBackground {
+}
+TexturedBackgroundLight {
+}
+RectangleArena {
+  floorSize 11 8
+  wallHeight 0.4
+  wallAppearance BrushedAluminium {
+    colorOverride 0 0 0
+  }
+}
+RobocupSoccerField {
+  size "kid"
+}
+RodaOmniBrone {
+  translation 1.4613286804878651e-05 1.6819162392779626e-05 0.07446450754014643
+  rotation -0.7389803179328288 0.673725977281513 0.0011820507458134158 0.0003344286230226566
+  controller "brone_ros_roda_check"
+}
+FifaSoccerBall {
+  translation 1.08 0 0.12233126795910884
+}

@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OP3 Power Monitor — Dashboard</title>
+    <meta name="description" content="Real-time power telemetry dashboard for ROBOTIS OP3 humanoid robot">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <!-- Header -->
+    <header class="header" id="header">
+        <div class="header-left">
+            <h1 class="header-title">⚡ OP3 POWER MONITOR</h1>
+            <span class="header-subtitle">ROBOTIS OP3 — Real-Time Power Telemetry · <a href="/" style="color:#58a6ff;text-decoration:none">← Kembali ke Menu</a></span>
+        </div>
+        <div class="header-right">
+            <div class="status-badge" id="ws-status">
+                <span class="status-dot disconnected"></span>
+                <span class="status-text">Disconnected</span>
+            </div>
+            <div class="status-badge" id="mgr-status">
+                <span class="status-dot disconnected"></span>
+                <span class="status-text">op3_manager</span>
+            </div>
+            <div class="status-badge" id="uptime-badge">
+                <span class="status-text uptime-text">00:00:00</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Grid -->
+    <main class="dashboard" id="dashboard">
+        <!-- Left Column -->
+        <section class="left-column">
+            <!-- Battery Gauge -->
+            <div class="panel battery-panel" id="battery-panel">
+                <h2 class="panel-title">Battery</h2>
+                <div class="battery-gauge-container">
+                    <canvas id="battery-gauge" width="260" height="260"></canvas>
+                    <div class="battery-value">
+                        <span class="battery-voltage" id="battery-voltage">--</span>
+                        <span class="battery-unit">V</span>
+                    </div>
+                    <div class="battery-status" id="battery-status">UNKNOWN</div>
+                </div>
+                <div class="battery-legend">
+                    <span class="legend-item"><span class="dot ok"></span> &gt;11.5V</span>
+                    <span class="legend-item"><span class="dot low"></span> &gt;11.0V</span>
+                    <span class="legend-item"><span class="dot critical"></span> &lt;11.0V</span>
+                </div>
+            </div>
+
+            <!-- Robot Body Map — Anatomically Accurate OP3 -->
+            <div class="panel robot-panel" id="robot-panel">
+                <h2 class="panel-title">Joint Voltage Map — 20 × XM430-W350</h2>
+                <div class="robot-body-container">
+                    <svg id="robot-svg" viewBox="0 0 260 420" class="robot-svg" xmlns="http://www.w3.org/2000/svg">
+                        <defs>
+                            <filter id="glow-ok">
+                                <feGaussianBlur stdDeviation="3" result="coloredBlur" />
+                                <feMerge>
+                                    <feMergeNode in="coloredBlur" />
+                                    <feMergeNode in="SourceGraphic" />
+                                </feMerge>
+                            </filter>
+                            <filter id="glow-low">
+                                <feGaussianBlur stdDeviation="3" result="coloredBlur" />
+                                <feMerge>
+                                    <feMergeNode in="coloredBlur" />
+                                    <feMergeNode in="SourceGraphic" />
+                                </feMerge>
+                            </filter>
+                            <filter id="glow-crit">
+                                <feGaussianBlur stdDeviation="4" result="coloredBlur" />
+                                <feMerge>
+                                    <feMergeNode in="coloredBlur" />
+                                    <feMergeNode in="SourceGraphic" />
+                                </feMerge>
+                            </filter>
+                            <!-- Body gradient -->
+                            <linearGradient id="body-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+                                <stop offset="0%" style="stop-color:rgba(88,166,255,0.12)" />
+                                <stop offset="100%" style="stop-color:rgba(88,166,255,0.04)" />
+                            </linearGradient>
+                        </defs>
+
+                        <!-- ============ SKELETON ============ -->
+                        <!-- Head (circle) -->
+                        <circle cx="130" cy="38" r="24" fill="url(#body-grad)" stroke="rgba(88,166,255,0.25)"
+                            stroke-width="1.5" />
+                        <!-- Camera eye -->
+                        <circle cx="130" cy="34" r="4" fill="rgba(88,166,255,0.15)" stroke="rgba(88,166,255,0.25)"
+                            stroke-width="1" />
+
+                        <!-- Neck -->
+                        <line x1="130" y1="62" x2="130" y2="78" class="robot-bone" />
+
+                        <!-- Torso (rounded rectangle) -->
+                        <rect x="90" y="78" width="80" height="95" rx="10" fill="url(#body-grad)"
+                            stroke="rgba(88,166,255,0.25)" stroke-width="1.5" />
+                        <!-- Center line on torso -->
+                        <line x1="130" y1="85" x2="130" y2="165" stroke="rgba(88,166,255,0.08)" stroke-width="1" />
+
+                        <!-- ===== RIGHT ARM (viewer's right = robot's left) ===== -->
+                        <!-- r_sho_pitch → r_sho_roll connection -->
+                        <line x1="170" y1="90" x2="192" y2="100" class="robot-bone" />
+                        <!-- r_sho_roll → r_el -->
+                        <line x1="192" y1="100" x2="205" y2="145" class="robot-bone" />
+                        <!-- r_el → hand -->
+                        <line x1="205" y1="145" x2="212" y2="190" class="robot-bone" />
+
+                        <!-- ===== LEFT ARM (viewer's left = robot's right) ===== -->
+                        <line x1="90" y1="90" x2="68" y2="100" class="robot-bone" />
+                        <line x1="68" y1="100" x2="55" y2="145" class="robot-bone" />
+                        <line x1="55" y1="145" x2="48" y2="190" class="robot-bone" />
+
+                        <!-- ===== RIGHT LEG ===== -->
+                        <!-- hip_yaw → hip_roll -->
+                        <line x1="152" y1="173" x2="157" y2="195" class="robot-bone" />
+                        <!-- hip_roll → hip_pitch -->
+                        <line x1="157" y1="195" x2="160" y2="220" class="robot-bone" />
+                        <!-- hip_pitch → knee -->
+                        <line x1="160" y1="220" x2="163" y2="275" class="robot-bone" stroke-width="3" />
+                        <!-- knee → ank_pitch -->
+                        <line x1="163" y1="275" x2="160" y2="335" class="robot-bone" stroke-width="3" />
+                        <!-- ank_pitch → ank_roll -->
+                        <line x1="160" y1="335" x2="160" y2="355" class="robot-bone" />
+                        <!-- Foot -->
+                        <rect x="145" y="355" width="35" height="12" rx="4" fill="url(#body-grad)"
+                            stroke="rgba(88,166,255,0.2)" stroke-width="1" />
+
+                        <!-- ===== LEFT LEG ===== -->
+                        <line x1="108" y1="173" x2="103" y2="195" class="robot-bone" />
+                        <line x1="103" y1="195" x2="100" y2="220" class="robot-bone" />
+                        <line x1="100" y1="220" x2="97" y2="275" class="robot-bone" stroke-width="3" />
+                        <line x1="97" y1="275" x2="100" y2="335" class="robot-bone" stroke-width="3" />
+                        <line x1="100" y1="335" x2="100" y2="355" class="robot-bone" />
+                        <!-- Foot -->
+                        <rect x="80" y="355" width="35" height="12" rx="4" fill="url(#body-grad)"
+                            stroke="rgba(88,166,255,0.2)" stroke-width="1" />
+
+                        <!-- ============ JOINT LABELS (group titles) ============ -->
+                        <text x="130" y="12" class="svg-label" text-anchor="middle">HEAD</text>
+                        <text x="30" y="88" class="svg-label" text-anchor="middle">L ARM</text>
+                        <text x="230" y="88" class="svg-label" text-anchor="middle">R ARM</text>
+                        <text x="73" y="185" class="svg-label" text-anchor="middle">L LEG</text>
+                        <text x="187" y="185" class="svg-label" text-anchor="middle">R LEG</text>
+
+                        <!-- ============ JOINT DOTS — 20 joints ============ -->
+                        <!-- OP3.robot config order — ID:name mapping as comments -->
+
+                        <!-- HEAD: ID 19 head_pan, ID 20 head_tilt -->
+                        <circle cx="118" cy="42" r="6" class="joint-dot" data-joint="head_pan" id="jd-head_pan">
+                            <title>head_pan (ID 19)</title>
+                        </circle>
+                        <circle cx="142" cy="42" r="6" class="joint-dot" data-joint="head_tilt" id="jd-head_tilt">
+                            <title>head_tilt (ID 20)</title>
+                        </circle>
+
+                        <!-- RIGHT ARM: ID 1 r_sho_pitch, ID 3 r_sho_roll, ID 5 r_el -->
+                        <circle cx="174" cy="88" r="7" class="joint-dot" data-joint="r_sho_pitch" id="jd-r_sho_pitch">
+                            <title>r_sho_pitch (ID 1)</title>
+                        </circle>
+                        <circle cx="192" cy="100" r="6" class="joint-dot" data-joint="r_sho_roll" id="jd-r_sho_roll">
+                            <title>r_sho_roll (ID 3)</title>
+                        </circle>
+                        <circle cx="205" cy="145" r="6" class="joint-dot" data-joint="r_el" id="jd-r_el">
+                            <title>r_el (ID 5)</title>
+                        </circle>
+
+                        <!-- LEFT ARM: ID 2 l_sho_pitch, ID 4 l_sho_roll, ID 6 l_el -->
+                        <circle cx="86" cy="88" r="7" class="joint-dot" data-joint="l_sho_pitch" id="jd-l_sho_pitch">
+                            <title>l_sho_pitch (ID 2)</title>
+                        </circle>
+                        <circle cx="68" cy="100" r="6" class="joint-dot" data-joint="l_sho_roll" id="jd-l_sho_roll">
+                            <title>l_sho_roll (ID 4)</title>
+                        </circle>
+                        <circle cx="55" cy="145" r="6" class="joint-dot" data-joint="l_el" id="jd-l_el">
+                            <title>l_el (ID 6)</title>
+                        </circle>
+
+                        <!-- RIGHT LEG: ID 7 r_hip_yaw, ID 9 r_hip_roll, ID 11 r_hip_pitch, ID 13 r_knee, ID 15 r_ank_pitch, ID 17 r_ank_roll -->
+                        <circle cx="152" cy="173" r="7" class="joint-dot" data-joint="r_hip_yaw" id="jd-r_hip_yaw">
+                            <title>r_hip_yaw (ID 7)</title>
+                        </circle>
+                        <circle cx="157" cy="195" r="6" class="joint-dot" data-joint="r_hip_roll" id="jd-r_hip_roll">
+                            <title>r_hip_roll (ID 9)</title>
+                        </circle>
+                        <circle cx="160" cy="220" r="6" class="joint-dot" data-joint="r_hip_pitch" id="jd-r_hip_pitch">
+                            <title>r_hip_pitch (ID 11)</title>
+                        </circle>
+                        <circle cx="163" cy="275" r="7" class="joint-dot" data-joint="r_knee" id="jd-r_knee">
+                            <title>r_knee (ID 13)</title>
+                        </circle>
+                        <circle cx="160" cy="335" r="6" class="joint-dot" data-joint="r_ank_pitch" id="jd-r_ank_pitch">
+                            <title>r_ank_pitch (ID 15)</title>
+                        </circle>
+                        <circle cx="160" cy="355" r="5" class="joint-dot" data-joint="r_ank_roll" id="jd-r_ank_roll">
+                            <title>r_ank_roll (ID 17)</title>
+                        </circle>
+
+                        <!-- LEFT LEG: ID 8 l_hip_yaw, ID 10 l_hip_roll, ID 12 l_hip_pitch, ID 14 l_knee, ID 16 l_ank_pitch, ID 18 l_ank_roll -->
+                        <circle cx="108" cy="173" r="7" class="joint-dot" data-joint="l_hip_yaw" id="jd-l_hip_yaw">
+                            <title>l_hip_yaw (ID 8)</title>
+                        </circle>
+                        <circle cx="103" cy="195" r="6" class="joint-dot" data-joint="l_hip_roll" id="jd-l_hip_roll">
+                            <title>l_hip_roll (ID 10)</title>
+                        </circle>
+                        <circle cx="100" cy="220" r="6" class="joint-dot" data-joint="l_hip_pitch" id="jd-l_hip_pitch">
+                            <title>l_hip_pitch (ID 12)</title>
+                        </circle>
+                        <circle cx="97" cy="275" r="7" class="joint-dot" data-joint="l_knee" id="jd-l_knee">
+                            <title>l_knee (ID 14)</title>
+                        </circle>
+                        <circle cx="100" cy="335" r="6" class="joint-dot" data-joint="l_ank_pitch" id="jd-l_ank_pitch">
+                            <title>l_ank_pitch (ID 16)</title>
+                        </circle>
+                        <circle cx="100" cy="355" r="5" class="joint-dot" data-joint="l_ank_roll" id="jd-l_ank_roll">
+                            <title>l_ank_roll (ID 18)</title>
+                        </circle>
+
+                        <!-- Hand markers -->
+                        <circle cx="212" cy="190" r="4" fill="rgba(88,166,255,0.1)" stroke="rgba(88,166,255,0.15)"
+                            stroke-width="1" />
+                        <circle cx="48" cy="190" r="4" fill="rgba(88,166,255,0.1)" stroke="rgba(88,166,255,0.15)"
+                            stroke-width="1" />
+                    </svg>
+                </div>
+                <!-- Hover tooltip -->
+                <div class="robot-tooltip" id="robot-tooltip" style="display:none;">
+                    <span class="tt-name" id="tt-name"></span>
+                    <span class="tt-vin" id="tt-vin"></span>
+                    <span class="tt-pos" id="tt-pos"></span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Right Column -->
+        <section class="right-column">
+            <!-- Voltage Chart -->
+            <div class="panel chart-panel" id="chart-panel">
+                <h2 class="panel-title">Battery Voltage — Last 60s</h2>
+                <div class="chart-container">
+                    <canvas id="voltage-chart"></canvas>
+                </div>
+            </div>
+
+            <!-- Joint Table -->
+            <div class="panel table-panel" id="table-panel">
+                <h2 class="panel-title">Per-Joint Detail — XM430-W350 × 20</h2>
+                <div class="table-toolbar">
+                    <div class="table-filter" id="table-filter">
+                        <button class="filter-btn active" data-group="all">All (20)</button>
+                        <button class="filter-btn" data-group="head">Head</button>
+                        <button class="filter-btn" data-group="r_arm">R Arm</button>
+                        <button class="filter-btn" data-group="l_arm">L Arm</button>
+                        <button class="filter-btn" data-group="r_leg">R Leg</button>
+                        <button class="filter-btn" data-group="l_leg">L Leg</button>
+                    </div>
+                </div>
+                <div class="table-container">
+                    <table id="joint-table">
+                        <thead>
+                            <tr>
+                                <th class="cell-id">ID</th>
+                                <th>JOINT</th>
+                                <th class="cell-vin">VIN (V)</th>
+                                <th class="cell-pos">POSITION (°)</th>
+                                <th class="cell-effort">TORQUE (N·m)</th>
+                                <th class="cell-current">CURRENT (A)</th>
+                                <th class="cell-power">POWER (W)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="joint-tbody">
+                            <!-- Dynamic rows -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Summary Cards -->
+            <div class="summary-row" id="summary-row">
+                <div class="panel summary-card">
+                    <span class="card-label">Total Power</span>
+                    <span class="card-value" id="total-power">--</span>
+                    <span class="card-unit">W</span>
+                </div>
+                <div class="panel summary-card">
+                    <span class="card-label">Avg Joint Voltage</span>
+                    <span class="card-value" id="avg-voltage">--</span>
+                    <span class="card-unit">V</span>
+                </div>
+                <div class="panel summary-card">
+                    <span class="card-label">Min Voltage</span>
+                    <span class="card-value" id="min-voltage">--</span>
+                    <span class="card-unit">V</span>
+                </div>
+                <div class="panel summary-card">
+                    <span class="card-label">Σ |TORQUE| (N·m)</span>
+                    <span class="card-value" id="total-effort">--</span>
+                    <span class="card-unit"></span>
+                </div>
+            </div>
+
+            <!-- Conclusion Panel -->
+            <div class="panel conclusion-panel" id="conclusion-panel">
+                <div class="conclusion-icon" id="conclusion-icon">⚡</div>
+                <div class="conclusion-body">
+                    <div class="conclusion-title" id="conclusion-title">Menunggu Data...</div>
+                    <div class="conclusion-text" id="conclusion-text">Dashboard terhubung. Menunggu data dari
+                        <strong>power_monitor_node</strong> untuk menampilkan kesimpulan sistem.
+                    </div>
+                    <div class="conclusion-timestamp" id="conclusion-ts"></div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Footer Branding -->
+    <footer class="footer" id="footer">
+        <div class="footer-brand">
+            <img src="logo_ub.png" alt="Universitas Brawijaya" class="footer-logo" id="logo-ub">
+            <span class="footer-item brand-ub">Universitas Brawijaya</span>
+        </div>
+        <span class="footer-separator">|</span>
+        <div class="footer-brand">
+            <img src="logo_globalizing.png" alt="Globalizing UB" class="footer-logo" id="logo-global">
+            <span class="footer-item brand-global">Globalizing UB</span>
+        </div>
+        <span class="footer-separator">|</span>
+        <div class="footer-brand">
+            <img src="logo_brone.png" alt="BRONE" class="footer-logo" id="logo-brone">
+            <span class="footer-item brand-brone">BRONE</span>
+        </div>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+
+</html>

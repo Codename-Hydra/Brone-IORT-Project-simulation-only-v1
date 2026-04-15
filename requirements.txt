@@ -1,0 +1,5 @@
+# Python dependencies for BRone-IORT-Project
+# These packages are required on top of the standard ROS 2 stack
+
+tornado>=6.0
+pygame>=2.0.0

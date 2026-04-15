@@ -1,0 +1,713 @@
+"""
+BRONE DITER: TAHAP 5 - FINAL FUSION (Physic High Fidelity + WS Bridge)
+File Source: Diter_Roda_Tahap5_WS_Bridge.py
+----------------------------------------------------------------
+Hardware Real-World Specs:
+- Battery: 2x LiPo 3S 5200mAh (Series) -> 6S System (22.2V Nom, 25.2V Max)
+- Controller: Orange Pi 5 Pro (Compute) + ESP32 (IO)
+- Motor: PG36 Planetary 24V
+- Driver: BTS7960 (Efficiency ~92%)
+- Wheel: Omniwheel 110mm (r=0.055)
+- Input: GameSir T4 (Fixed Map: L1=6, R1=7)
+"""
+
+import os
+import math
+import json
+import asyncio
+import threading
+import websockets
+from controller import Robot
+from database_logger import TelemetryDatabase
+
+# Sembunyikan prompt support pygame
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
+
+try:
+    import pygame
+except ImportError:
+    print("CRITICAL: Pygame error. Install: sudo apt install python3-pygame")
+
+# --- KONFIGURASI SERVER WEBSOCKET ---
+WS_HOST = "0.0.0.0"  # Listen on all interfaces
+WS_PORT = 8765
+
+# --- KONFIGURASI FILE ---
+BATTERY_CONFIG_FILE = "battery_config.json"
+BATTERY_STATE_FILE = "brone_battery_state.txt"
+
+class BroneDiterPhysics:
+    def __init__(self):
+        # --- 1. INIT ROBOT & WEBOTS ---
+        self.robot = Robot()
+        self.timestep = int(self.robot.getBasicTimeStep())
+        self.SAVE_FILE = "brone_battery_state.txt"
+
+        # --- 2. BATTERY CONFIGURATION (Dynamic - Load from file) ---
+        # This will set: BATT_SERIES, BATT_NOMINAL_VOLTAGE, BATT_MAX_VOLTAGE, 
+        #                BATT_MIN_VOLTAGE, BATT_CAPACITY_MAH
+        self.load_battery_config()
+        
+        # Resistansi Internal (R_int)
+        # Estimasi: (15mOhm per cell x 6) + Kabel/Konektor ~ 85mOhm total
+        self.R_INTERNAL = 0.085 
+        
+        # Kapasitas Energi Total (Joule) = V_nom * Ah * 3600
+        # Calculated after battery config loaded
+        self.total_energy_capacity = (
+            self.BATT_NOMINAL_VOLTAGE * 
+            (self.BATT_CAPACITY_MAH / 1000.0) * 
+            3600.0
+        )
+        self.current_energy = self.total_energy_capacity 
+
+        # --- 3. MODEL BEBAN ELEKTRONIK (Orange Pi 5 Pro + ESP32) ---
+        # Beban statis (P_STATIC) akan menarik arus dinamis (I = P/V)
+        # OPi5 (~5-7W) + ESP32 (~0.5W) + Fan/Sensors (~1W)
+        self.P_STATIC = 8.5  # Watt 
+        
+        # Efisiensi Driver Motor (BTS7960 H-Bridge)
+        # 8% energi hilang sebagai panas di heatsink driver
+        self.DRIVER_EFFICIENCY = 0.92 
+        
+        # --- 4. MODEL MOTOR (PG36 24V) ---
+        self.I_IDLE = 0.35        # Arus motor berputar tanpa beban (A)
+        self.I_STALL = 7.5        # Arus motor ditahan paksa (A)
+        self.TORQUE_STALL = 2.5   # Torsi Stall (Nm)
+        self.MAX_SPEED = 46.0     # Rad/s (Sesuai Proto)
+        
+        # Konstanta Torsi (Kt) = Nm / Ampere
+        self.K_T = self.TORQUE_STALL / (self.I_STALL - self.I_IDLE)
+
+        # --- 5. KINEMATIKA (Omni 110mm) ---
+        self.r_wheel = 0.055 
+        self.L = 0.208 
+        self.INV_W1 = -1.0
+        self.INV_W2 = -1.0
+        self.INV_W3 = -1.0
+        self.INV_W4 = -1.0
+        self.sin_a = 0.7071
+        self.cos_a = 0.7071
+
+        # --- 6. SETUP DEVICES ---
+        self.wheel_names = ['wheel1', 'wheel2', 'wheel3', 'wheel4']
+        self.wheels = []
+        for name in self.wheel_names:
+            m = self.robot.getDevice(name)
+            if m:
+                m.setPosition(float('inf'))
+                m.setVelocity(0.0)
+                m.enableTorqueFeedback(self.timestep)
+                self.wheels.append(m)
+            else:
+                print(f"!! CRITICAL: Device {name} not found in PROTO")
+
+        # --- 7. JOYSTICK & BUTTONS (Fixed Mapping: 6 & 7) ---
+        self.BTN_L1 = 6
+        self.BTN_R1 = 7
+        self.js = None
+        self._init_joystick()
+
+        # Telemetri Data Container (Shared Memory untuk WS)
+        self.telemetry = {
+            "voltage": 0.0,
+            "current": 0.0,
+            "power": 0.0,
+            "soc": 100.0,
+            "runtime": 0.0,
+            "torques": [0,0,0,0],
+            "rpm": [0,0,0,0]
+        }
+        
+        # Start WebSocket Thread
+        self.loop = asyncio.new_event_loop()
+        self.ws_thread = threading.Thread(target=self._start_ws_server, args=(self.loop,), daemon=True)
+        self.ws_thread.start()
+        
+        # Logging helper
+        self.last_log = 0.0
+        self.avg_power_window = []
+        
+        # Motion tracking (for visualizer arrow)
+        self.motion_vx = 0.0
+        self.motion_vy = 0.0
+        self.motion_w = 0.0
+        
+        # RPM Moving Average Buffer (untuk telemetri smooth)
+        self.rpm_history = [[], [], [], []]  # 4 roda
+        self.RPM_WINDOW_SIZE = 20  # 20 samples untuk averaging
+        
+        # Database logger
+        self.db = TelemetryDatabase("robot_telemetry.db")
+        self.session_id = None
+        self.last_db_log = 0.0
+        self.DB_LOG_INTERVAL = 1.0  # Log to database every 1 second
+        
+        # Robot enable/disable control
+        self.robot_enabled = False  # Start disabled, user must click "Start Program"
+        
+        # Uptime tracking (for reset functionality)
+        self.uptime_offset = 0.0  # Offset to reset uptime counter
+
+    def _init_joystick(self):
+        try:
+            pygame.init()
+            pygame.joystick.init()
+            if pygame.joystick.get_count() > 0:
+                self.js = pygame.joystick.Joystick(0)
+                self.js.init()
+                print(f">> JOYSTICK READY: {self.js.get_name()}")
+                print(f">> MAPPING: L1={self.BTN_L1} (Resume), R1={self.BTN_R1} (Reset)")
+            else:
+                print("!! WARNING: No Joystick found. Running in passive mode.")
+        except Exception as e:
+            print(f"!! Pygame Init Error: {e}")
+    
+    # --- BATTERY CONFIGURATION MANAGEMENT ---
+    def load_battery_config(self):
+        """Load battery configuration from file or use defaults"""
+        if os.path.exists(BATTERY_CONFIG_FILE):
+            try:
+                with open(BATTERY_CONFIG_FILE, 'r') as f:
+                    config = json.load(f)
+                    
+                battery_type = config.get('battery_type', '3S')
+                series_count = config.get('series_count', 2)
+                custom_params = config.get('custom_params', None)
+                self.BATT_CAPACITY_MAH = config.get('capacity_mah', 5200.0)
+                
+                self.update_battery_params(battery_type, series_count, custom_params)
+                print(f">> BATTERY CONFIG LOADED: {battery_type} x{series_count}")
+                return
+            except Exception as e:
+                print(f"!! Error loading battery config: {e}")
+        
+        # Default: 2x 3S Series = 6S
+        self.BATT_CAPACITY_MAH = 5200.0
+        self.update_battery_params('3S', 2)
+        print(">> BATTERY CONFIG: Using defaults (2x 3S = 6S)")
+    
+    
+    def save_battery_config(self, battery_type, series_count, capacity_mah, custom_params=None):
+        """Save battery configuration to file"""
+        config = {
+            "battery_type": battery_type,
+            "series_count": series_count,
+            "capacity_mah": capacity_mah
+        }
+        if custom_params:
+            config["custom_params"] = custom_params
+            
+        with open(BATTERY_CONFIG_FILE, 'w') as f:
+            json.dump(config, f, indent=2)
+        print(f">> BATTERY CONFIG SAVED: {battery_type} x{series_count}")
+    
+    def update_battery_params(self, battery_type, series_count, custom_params=None):
+        """Update all battery parameters based on configuration"""
+        # Voltage specifications per battery type
+        configs = {
+            "2S": {"nominal": 7.4, "max": 8.4, "min": 6.0, "cells": 2},
+            "3S": {"nominal": 11.1, "max": 12.6, "min": 9.0, "cells": 3},
+            "4S": {"nominal": 14.8, "max": 16.8, "min": 12.0, "cells": 4},
+            "6S": {"nominal": 22.2, "max": 25.2, "min": 18.0, "cells": 6},
+            "8S": {"nominal": 29.6, "max": 33.6, "min": 24.0, "cells": 8}
+        }
+        
+        base = None
+        
+        if battery_type == "Custom" and custom_params:
+            base = custom_params
+        elif battery_type in configs:
+            base = configs[battery_type]
+        else:
+            print(f"!! Unknown battery type: {battery_type}, using 3S")
+            base = configs["3S"]
+        
+        # Apply series multiplier (Custom params already handled as single unit if logic above dictates, but let's be consistent)
+        # If Custom, we treat input as Per-Pack values.
+        
+        self.BATT_SERIES = base["cells"] * series_count
+        self.BATT_NOMINAL_VOLTAGE = base["nominal"] * series_count
+        self.BATT_MAX_VOLTAGE = base["max"] * series_count
+        self.BATT_MIN_VOLTAGE = base["min"] * series_count
+
+    # --- WEBSOCKET SERVER ---
+    def _start_ws_server(self, loop):
+        asyncio.set_event_loop(loop)
+        start_server = websockets.serve(self.ws_handler, WS_HOST, WS_PORT)
+        print(f">> WS SERVER ACTIVE: ws://{WS_HOST}:{WS_PORT}")
+        loop.run_until_complete(start_server)
+        loop.run_forever()
+
+    async def ws_handler(self, websocket, path):
+        # Create concurrent tasks for sending telemetry and receiving commands
+        sender_task = asyncio.create_task(self._send_telemetry_loop(websocket))
+        receiver_task = asyncio.create_task(self._receive_command_loop(websocket))
+        
+        try:
+            # Wait for either task to finish (e.g. connection closed)
+            done, pending = await asyncio.wait(
+                [sender_task, receiver_task],
+                return_when=asyncio.FIRST_COMPLETED
+            )
+            for task in pending:
+                task.cancel()
+        except Exception as e:
+            print(f"!! WebSocket Error: {e}")
+
+    async def _send_telemetry_loop(self, websocket):
+        """Producer: Sends telemetry data to client"""
+        try:
+            while True:
+                # Format data sesuai ekspektasi Digital Twin Interface
+                data = {
+                    "timestamp": self.robot.getTime(),
+                    "electrical": {
+                        "voltage": self.telemetry["voltage"],
+                        "current": self.telemetry["current"],
+                        "power": self.telemetry["power"],
+                        "cell_voltage": round(self.telemetry["voltage"] / (self.BATT_SERIES if self.BATT_SERIES > 0 else 6.0), 3)
+                    },
+                    "battery": {
+                        "soc": self.telemetry["soc"],
+                        "runtime_hours": self.telemetry["runtime"],
+                        "config": f"{self.BATT_NOMINAL_VOLTAGE:.1f}V ({int(self.BATT_SERIES)}S)"
+                    },
+                    "motors": {
+                        "torques": {
+                            "FL": self.telemetry["torques"][0] if len(self.telemetry["torques"]) > 0 else 0,
+                            "FR": self.telemetry["torques"][1] if len(self.telemetry["torques"]) > 1 else 0,
+                            "RL": self.telemetry["torques"][2] if len(self.telemetry["torques"]) > 2 else 0,
+                            "RR": self.telemetry["torques"][3] if len(self.telemetry["torques"]) > 3 else 0
+                        },
+                        "rpm": {
+                            "FL": int(self.telemetry["rpm"][0]) if len(self.telemetry["rpm"]) > 0 else 0,
+                            "FR": int(self.telemetry["rpm"][1]) if len(self.telemetry["rpm"]) > 1 else 0,
+                            "RL": int(self.telemetry["rpm"][2]) if len(self.telemetry["rpm"]) > 2 else 0,
+                            "RR": int(self.telemetry["rpm"][3]) if len(self.telemetry["rpm"]) > 3 else 0
+                        },
+                        "avg_rpm": int(sum([abs(rpm) for rpm in self.telemetry["rpm"]]) / 4 if self.telemetry["rpm"] else 0)
+                    },
+                    "motion": {
+                        "vx": round(self.motion_vx, 3),
+                        "vy": round(self.motion_vy, 3),
+                        "w": round(self.motion_w, 3)
+                    },
+                    "system": {
+                        "uptime": round(self.robot.getTime() - self.uptime_offset, 2),
+                        "ping_ms": 0
+                    }
+                }
+                
+                await websocket.send(json.dumps(data))
+                await asyncio.sleep(0.2)  # 5Hz update rate
+        except websockets.ConnectionClosed:
+            pass
+
+    async def _receive_command_loop(self, websocket):
+        """
+        Consumer: Receives and processes commands from web client
+        
+        Supported commands:
+        - update_battery_config: Change battery type/voltage parameters
+        - stop_program: Disable robot motion and stop motors
+        - start_program: Enable robot motion  
+        - reset_system: Reset all data to initial state (battery 100%, clear telemetry)
+        """
+        try:
+            async for message in websocket:
+                try:
+                    cmd = json.loads(message)
+                    command = cmd.get("command")
+                    print(f">> WS COMMAND RECEIVED: {command}")
+                    
+                    # ==========================================
+                    # BATTERY CONFIGURATION UPDATE
+                    # ==========================================
+                    if command == "update_battery_config":
+                        b_type = cmd.get("battery_type")
+                        s_count = cmd.get("series_count", 1)
+                        param_updates = {}
+                        
+                        if b_type == "Custom":
+                            c_nom = cmd.get("custom_nominal")
+                            c_max = cmd.get("custom_max")
+                            c_min = cmd.get("custom_min")
+                            
+                            if c_nom and c_max and c_min:
+                                param_updates = {
+                                    "nominal": float(c_nom),
+                                    "max": float(c_max),
+                                    "min": float(c_min),
+                                    "cells": 1
+                                }
+                        
+                        self.update_battery_params(b_type, s_count, custom_params=param_updates)
+                        self.save_battery_config(b_type, s_count, self.BATT_CAPACITY_MAH, custom_params=param_updates)
+                        
+                        # Recalculate energy capacity
+                        self.total_energy_capacity = (
+                            self.BATT_NOMINAL_VOLTAGE * 
+                            (self.BATT_CAPACITY_MAH / 1000.0) * 
+                            3600.0
+                        )
+                        self.current_energy = self.total_energy_capacity
+                        print(f">> BATTERY RECONFIGURED: {self.BATT_NOMINAL_VOLTAGE:.1f}V")
+                    
+                    # ==========================================
+                    # ROBOT MOTION CONTROL
+                    # ==========================================
+                    elif command == "stop_program":
+                        """Disable robot motion and stop all motors"""
+                        print(">> STOP PROGRAM - Disabling robot motion...")
+                        self.robot_enabled = False
+                        
+                        for wheel in self.wheels:
+                            wheel.setVelocity(0.0)
+                        
+                        self.motion_vx = 0.0
+                        self.motion_vy = 0.0
+                        self.motion_w = 0.0
+                        
+                        print(">> ✅ ROBOT STOPPED - Motion disabled, motors stopped")
+                    
+                    elif command == "start_program":
+                        """Enable robot motion and allow control inputs"""
+                        print(">> START PROGRAM - Enabling robot motion...")
+                        self.robot_enabled = True
+                        print(">> ✅ ROBOT STARTED - Motion enabled, ready for input")
+                    
+                    # ==========================================
+                    # SYSTEM RESET
+                    # ==========================================
+                    elif command == "reset_system":
+                        """Reset all system data to initial state"""
+                        print(">> RESET COMMAND RECEIVED - Resetting system...")
+                        
+                        # Reset uptime counter
+                        self.uptime_offset = self.robot.getTime()
+                        
+                        # Reset battery to full
+                        self.current_energy = self.total_energy_capacity
+                        
+                        # Clear all telemetry
+                        self.telemetry = {
+                            "voltage": self.BATT_NOMINAL_VOLTAGE,
+                            "current": 0.0,
+                            "power": 0.0,
+                            "soc": 100.0,
+                            "runtime": 0.0,
+                            "torques": [0, 0, 0, 0],
+                            "rpm": [0, 0, 0, 0]
+                        }
+                        
+                        # Clear motion tracking
+                        self.motion_vx = 0.0
+                        self.motion_vy = 0.0
+                        self.motion_w = 0.0
+                        
+                        # Clear data buffers
+                        self.rpm_history = [[], [], [], []]
+                        self.avg_power_window = []
+                        
+                        # Stop all motors
+                        for wheel in self.wheels:
+                            wheel.setVelocity(0.0)
+                        
+                        # Save state to file
+                        with open(self.SAVE_FILE, "w") as f:
+                            f.write(str(self.current_energy))
+                        
+                        print(">> ✅ SYSTEM RESET COMPLETE - Battery 100%, All systems cleared")
+                        
+                except json.JSONDecodeError:
+                    print("!! WS JSON Error: Invalid command format")
+        except websockets.ConnectionClosed:
+            pass
+
+    # --- INPUT SYSTEM ---
+    def get_input(self):
+        pygame.event.pump()
+        if not self.js: return 0, 0, 0
+
+        raw_x = self.js.get_axis(0)
+        raw_y = self.js.get_axis(1)
+        raw_rot = 0.0
+        
+        # L1/R1 untuk rotasi (setelah menu startup selesai)
+        try:
+            if self.js.get_button(self.BTN_L1):      # Button 6 - rotate left
+                raw_rot = -1.0
+            elif self.js.get_button(self.BTN_R1):   # Button 7 - rotate right  
+                raw_rot = 1.0
+        except: 
+            pass
+        
+        # Deadzone untuk analog sticks
+        if abs(raw_x) < 0.1: raw_x = 0.0
+        if abs(raw_y) < 0.1: raw_y = 0.0
+
+        # Mapping axes ke velocity
+        return raw_x * -1.0, raw_y * 1.0, raw_rot * -2.0
+
+    # --- PHYSICS ENGINE (DITER CORE) ---
+    def calculate_physics_model(self, dt):
+        """
+        Menghitung konsumsi energi real-time berdasarkan beban fisik
+        dan karakteristik kimia baterai LiPo 6S.
+        """
+        # 1. Hitung State of Charge (SoC) 0.0 - 1.0
+        soc = max(0.0, self.current_energy / self.total_energy_capacity)
+        
+        # 2. Hitung Open Circuit Voltage (OCV)
+        # Model Linear LiPo 6S: 19.8V (Kosong) s.d. 25.2V (Penuh)
+        # V_oc tergantung sisa energi kimia di baterai
+        v_oc = self.BATT_MIN_VOLTAGE + (soc * (self.BATT_MAX_VOLTAGE - self.BATT_MIN_VOLTAGE))
+        
+        # 3. Hitung Arus Motor (Berdasarkan Torsi Webots)
+        i_motors_load = 0.0
+        torques_data = []
+        rpms_data = []
+        # Hitung Real RPM dari setiap roda dengan MOVING AVERAGE
+        for i, m in enumerate(self.wheels):
+            # Ambil Feedback Torsi (Newton Meter)
+            tau = m.getTorqueFeedback()
+            if math.isnan(tau): tau = 0.0
+            torques_data.append(tau)
+            
+            # Konversi Torsi ke Arus Listrik
+            # Rumus DC Motor: I = (Torsi / Kt) + I_loss_friction
+            i_single_motor = (abs(tau) / self.K_T) + self.I_IDLE
+            i_motors_load += i_single_motor
+            
+            # MOVING AVERAGE untuk RPM (smooth telemetry)
+            rad_s = m.getVelocity()
+            current_rpm = rad_s * 9.5493  # 1 rad/s ≈ 9.5493 RPM
+            
+            # Tambahkan ke history buffer
+            self.rpm_history[i].append(current_rpm)
+            
+            # Jaga ukuran buffer (FIFO)
+            if len(self.rpm_history[i]) > self.RPM_WINDOW_SIZE:
+                self.rpm_history[i].pop(0)
+            
+            # Hitung rata-rata dari buffer untuk smooth telemetry
+            if self.rpm_history[i]:
+                avg_rpm = sum(self.rpm_history[i]) / len(self.rpm_history[i])
+                rpms_data.append(avg_rpm)
+            else:
+                rpms_data.append(0.0)
+
+        # 4. Total Current Draw (Input Baterai)
+        # Masukkan efisiensi driver (Panas di MOSFET BTS7960)
+        i_driver_input = i_motors_load / self.DRIVER_EFFICIENCY
+        
+        # Hitung arus beban elektronik (Constant Power Load)
+        # Jika voltase baterai turun, arus Orange Pi akan NAIK (P=VI)
+        if v_oc > 0:
+            i_static = self.P_STATIC / v_oc
+        else:
+            i_static = 0
+        
+        i_total = i_driver_input + i_static
+        
+        # 5. Hitung Voltage Drop (Terminal Voltage)
+        # V_term = V_oc - (Arus * Resistansi_Internal)
+        # Ini mensimulasikan "Voltage Sag" saat robot nge-gas
+        v_terminal = v_oc - (i_total * self.R_INTERNAL)
+        if v_terminal < 0: v_terminal = 0.0
+            
+        # 6. Integrasi Energi (Coulomb Counting / Joule Counting)
+        power_instant = v_terminal * i_total
+        energy_consumed = power_instant * dt
+        self.current_energy -= energy_consumed
+        
+        # 7. Update Telemetri & Estimasi Waktu
+        self.avg_power_window.append(power_instant)
+        if len(self.avg_power_window) > (5.0 / dt): self.avg_power_window.pop(0)
+        
+        avg_power = sum(self.avg_power_window) / len(self.avg_power_window) if self.avg_power_window else 0
+        est_runtime_h = (self.current_energy / 3600.0) / avg_power if avg_power > 1 else 99.0
+
+        # Simpan data ke variabel global untuk dibaca WebSocket
+        self.telemetry = {
+            "voltage": round(v_terminal, 2),
+            "current": round(i_total, 2),
+            "power": round(power_instant, 2),
+            "soc": round(soc * 100, 1),
+            "runtime": round(est_runtime_h, 2),
+            "torques": [round(t, 2) for t in torques_data],
+            "rpm": [round(r, 0) for r in rpms_data]
+        }
+        
+        return v_terminal
+
+    # --- MENU & STATE MANAGEMENT ---
+    def wait_for_startup_menu(self):
+        """Tampilkan menu startup: Resume atau Reset battery"""
+        print("\n" + "="*50)
+        print(" STARTUP MENU - BATTERY STATE ")
+        print("="*50)
+        print(f"Current Battery Energy: {self.current_energy:,.0f} J")
+        print(f"SoC: {(self.current_energy / self.total_energy_capacity) * 100:.1f}%")
+        print()
+        print("OPTIONS:")
+        print(f"  L1 (Button {self.BTN_L1}) = RESUME (keep current battery state)")
+        print(f"  R1 (Button {self.BTN_R1}) = RESET  (reset to full battery)")
+        print()
+        print("⏱️  Auto-RESUME in 5 seconds if no input...")
+        print("="*50)
+        
+        # Timeout mechanism
+        start_time = self.robot.getTime()
+        TIMEOUT = 5.0  # 5 seconds timeout
+        
+        selected = False
+        # Loop sampai user pilih atau timeout
+        while self.robot.step(self.timestep) != -1 and not selected:
+            elapsed = self.robot.getTime() - start_time
+            
+            # Check timeout
+            if elapsed >= TIMEOUT:
+                print(">> AUTO-RESUME: Continuing with current battery state (timeout)")
+                break # Exit loop, selected remains False, so it will resume
+            
+            pygame.event.pump()
+            if not self.js: # Use self.js for consistency
+                continue
+            
+            try:
+                if self.js.get_button(self.BTN_L1):  # L1
+                    # Resume - load from save file
+                    if os.path.exists(self.SAVE_FILE):
+                        with open(self.SAVE_FILE, "r") as f:
+                            self.current_energy = float(f.read())
+                        soc = (self.current_energy / self.total_energy_capacity) * 100
+                        print(f">> RESUME: Battery loaded ({soc:.1f}%)")
+                    else:
+                        print(">> RESUME: No save file, starting fresh (100%)")
+                    selected = True
+                    
+                elif self.js.get_button(self.BTN_R1):
+                    # Reset - full charge
+                    self.current_energy = self.total_energy_capacity
+                    with open(self.SAVE_FILE, "w") as f:
+                        f.write(str(self.current_energy))
+                    print(">> RESET: Battery FULL (100%)")
+                    selected = True
+            except: pass
+        
+        # Debounce - tunggu button release
+        if selected:
+            start = self.robot.getTime()
+            while self.robot.step(self.timestep) != -1:
+                if self.robot.getTime() - start > 0.5: break
+
+    # --- MAIN LOOP ---
+    def run(self):
+        # Show startup menu ONCE at beginning
+        self.wait_for_startup_menu()
+        
+        # Start database session
+        self.session_id = self.db.start_session(self.current_energy, "Webots Simulation")
+        
+        print("\n=== BRONE DITER: TAHAP 5 STARTED ===")
+        print(f"Batt: 6S (2x 3S Seri) | Cap: {self.BATT_CAPACITY_MAH}mAh")
+        print(f"Physics Engine: Active | WebSocket: Active | DB Session: {self.session_id}")
+        print(f"Robot Status: {'🔴 DISABLED' if not self.robot_enabled else '🟢 ENABLED'}")
+        print("Controls: Left Stick = Move | L1/R1 = Rotate")
+        if not self.robot_enabled:
+            print("⚠️  Robot is DISABLED. Click 'Start Program' in web interface to enable.")
+        print("Waiting for Input...\n")
+        
+        try:
+            while self.robot.step(self.timestep) != -1:
+                dt = self.timestep / 1000.0
+                t = self.robot.getTime()
+
+                # Get joystick input
+                vx, vy, w = self.get_input()
+                
+                # If robot disabled, zero all inputs
+                if not self.robot_enabled:
+                    vx, vy, w = 0.0, 0.0, 0.0
+                
+                # Store for WebSocket visualization
+                self.motion_vx = vx
+                self.motion_vy = vy
+                self.motion_w = w
+
+                # 2. Kinematika (Omni/Mecanum)
+                # v = (1/r) * (vx +/- vy +/- wL)
+                w1 = (-self.cos_a * vx + self.sin_a * vy + self.L * w) / self.r_wheel
+                w2 = (-self.cos_a * vx - self.sin_a * vy + self.L * w) / self.r_wheel
+                w3 = ( self.cos_a * vx - self.sin_a * vy + self.L * w) / self.r_wheel
+                w4 = ( self.cos_a * vx + self.sin_a * vy + self.L * w) / self.r_wheel
+                
+                # 3. Actuation - SIMPLE STYLE (Match ROS Bridge)
+                # Langsung ke motor dengan correction factor
+                vels = [
+                    w1 * self.INV_W1,
+                    w2 * self.INV_W2,
+                    w3 * self.INV_W3,
+                    w4 * self.INV_W4
+                ]
+                
+                # Apply motor velocities (only if robot is enabled)
+                if self.robot_enabled:
+                    for i, m in enumerate(self.wheels):
+                        m.setVelocity(vels[i])
+                else:
+                    # Keep motors at 0 when disabled
+                    for m in self.wheels:
+                        m.setVelocity(0.0)
+
+                # 4. Kalkulasi DITER (Physics & Energy)
+                voltage = self.calculate_physics_model(dt)
+
+                # 5. Proteksi Baterai (Low Voltage Cutoff)
+                if voltage <= self.BATT_MIN_VOLTAGE:
+                    print(f"!!! CRITICAL LOW BATT ({voltage:.2f}V) !!!")
+                    # Matikan motor untuk safety
+                    for m in self.wheels: m.setVelocity(0)
+                        
+                # 6. Logging Berkala ke Console (dengan detail battery)
+                # (Data detail dikirim via WebSocket 5 Hz)
+                if t - self.last_log > 1.0:
+                    d = self.telemetry
+                    soc_pct = (self.current_energy / self.total_energy_capacity) * 100
+                    
+                    # More detailed logging
+                    print(f"[{t:06.1f}s] {d['voltage']}V | {d['current']:5.2f}A | {d['power']:5.2f}W | " +
+                          f"SoC:{soc_pct:5.1f}% (energy:{self.current_energy:,.0f}J) | " +
+                          f"Runtime:{d['runtime']:.2f}h")
+                    
+                    # Auto Save untuk mencegah data hilang jika crash
+                    with open(self.SAVE_FILE, "w") as f:
+                        f.write(str(self.current_energy))
+                    self.last_log = t
+                
+                # 7. Database Logging (periodic)
+                if t - self.last_db_log >= self.DB_LOG_INTERVAL:
+                    self.db.log_telemetry(
+                        self.session_id,
+                        t,
+                        self.telemetry,
+                        self.current_energy,
+                        (vx, vy, w)
+                    )
+                    self.last_db_log = t
+        
+        except KeyboardInterrupt:
+            print("\n>> Simulation interrupted by user")
+        except Exception as e:
+            print(f"\n!! ERROR: {e}")
+        finally:
+            # End database session
+            self.db.end_session(self.session_id, self.current_energy)
+            self.db.close()
+            print(">> System shutdown complete")
+
+if __name__ == "__main__":
+    bot = BroneDiterPhysics()
+    bot.run()

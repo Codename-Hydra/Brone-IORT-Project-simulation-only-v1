@@ -1,0 +1,2 @@
+log_id,session_id,timestamp,voltage,current,power,cell_voltage,soc,runtime_hours,energy_remaining,torque_fl,torque_fr,torque_rl,torque_rr,rpm_fl,rpm_fr,rpm_rl,rpm_rr,motion_vx,motion_vy,motion_w
+1,1,1.0,24.5,12.3,301.35,4.083333333333333,95.0,1.2,95000.0,0.1,0.15,0.12,0.14,100,105,98,102,0.5,0.3,0.1
